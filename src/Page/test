@@ -1,0 +1,42 @@
+import { Hono } from 'hono'
+
+type Bindings = {
+    db: D1Database
+}
+
+const app = new Hono<{ Bindings: Bindings }>()
+const db = (c: any, sqltext: string) => c.env.db.prepare(sqltext)
+
+const publicRoute = app
+    // 1. ดึงนิยายทั้งหมด (หน้าแรก)
+    .get('/novels', async (c) => {
+        try {
+            // ดึงข้อมูลมาโชว์หน้าแรก (เอาแค่ข้อมูลสำคัญๆ ไม่ต้องเอาเนื้อหาตอน)
+            const { results } = await db(c,
+                'SELECT id, title, description, category, created_at FROM novels ORDER BY created_at DESC'
+            ).all()
+            return c.json({ novels: results })
+        } catch (e: any) {
+            return c.json({ error: e.message }, 500)
+        }
+    })
+
+    // 2. ดึงรายละเอียดนิยาย (สำหรับคนทั่วไปกดเข้าไปดูสารบัญ)
+    .get('/novels/:id', async (c) => {
+        const id = c.req.param('id')
+        try {
+            const novel = await db(c, 'SELECT * FROM novels WHERE id = ?').bind(id).first()
+            if (!novel) return c.json({ error: 'ไม่พบนิยาย' }, 404)
+
+            // ดึงชื่อตอน (แต่ไม่เอาเนื้อหา) ให้คนเห็นว่ามีตอนอะไรบ้าง
+            const { results } = await db(c, 
+                'SELECT id, title, created_at FROM chapters WHERE novel_id = ? ORDER BY id ASC'
+            ).bind(id).all()
+
+            return c.json({ novel, chapters: results })
+        } catch (e: any) {
+            return c.json({ error: e.message }, 500)
+        }
+    })
+
+export default publicRoute
